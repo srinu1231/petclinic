@@ -1,78 +1,60 @@
 pipeline {
-	agent any
-	stages {
-        	stage('compile, test and package') {
-        		steps {
-            			sh 'mvn clean package'
-			}
-        	}
-               stage('SonarQube analysis') { 
-                        steps {
-                                withSonarQubeEnv('Sonar') {
-                                        script {
-                                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:3.3.0.603:sonar ' + 
-                                        '-f pom.xml ' +
-                                        '-Dsonar.projectKey=com.petclinic:all:master ' +
-                                        '-Dsonar.login=admin ' +
-                                        '-Dsonar.password=admin ' +
-                                        '-Dsonar.language=java ' +
-                                        '-Dsonar.sources=. ' +
-                                        '-Dsonar.tests=. ' +
-                                        '-Dsonar.test.inclusions=**/*Test*/** ' +
-                                        '-Dsonar.exclusions=**/*Test*/** '
-                                        }
-                                }
-                                script {
-                                        sleep 30
-                                                timeout(time: 1, unit: 'HOURS') {  
-                                                def qg = waitForQualityGate()
-                                                        if (qg.status != 'OK') {
-                                                                error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                                                        }
-                                                }
-                                }
-                        }
+        agent {
+                docker {
+                        image 'maven:3-alpine'
                 }
-               /* stage("SonarQube Quality Gate") { 
-                        steps {
-                                script {
-                                        timeout(time: 1, unit: 'HOURS') {  
-                                                def qg = waitForQualityGate()
-                                                if (qg.status != 'OK') {
-                                                        error "Pipeline aborted due to quality gate failure: ${qg.status}"
-                                                }
+        }
+	//tools {
+        //        maven 'm3' 
+        //}
+	stages {
+    		stage('Build') 	{
+			steps {
+        			sh 'mvn package'
+			}
+    		}
+    		stage('parallel stages') {
+    		        parallel {
+    			        stage('Archival') {
+				        steps {
+        				        archiveArtifacts 'target/*.war'
+				        }
+    			        }
+		
+			        stage('Test cases') {
+				        steps {
+        				        junit 'target/surefire-reports/*.xml'
+				        }
+    		                }
+                                stage('Publish') {
+                                        steps {
+                                                //nexusPublisher nexusInstanceId: 'nexus2', nexusRepositoryId: 'snapshots', packages: [[$class: 'MavenPackage', mavenAssetList: [[classifier: '', extension: '', filePath: 'target/petclinic.war']], mavenCoordinate: [artifactId: 'spring-petclinic', groupId: 'org.springframework.samples', packaging: 'war', version: '4.2.6-SNAPSHOT']]]
+                                                nexusArtifactUploader artifacts: [[artifactId: 'spring-petclinic', classifier: '', file: 'target/petclinic.war', type: 'war']], credentialsId: 'nexuscred', groupId: 'org.springframework.samples', nexusUrl: '192.168.100.12:8080/nexus', nexusVersion: 'nexus2', protocol: 'http', repository: 'snapshots', version: '4.2.6-SNAPSHOT'
+
                                         }
                                 }
-                        }
-                } */
-        	stage('archival') {
-        		steps {
-            	 		archiveArtifacts 'target/*.?ar'
-            		}
-        	}
-        	stage('unit test') {
-        		steps {
-		            	junit 'target/surefire-reports/*.xml'
-            		}
-        	}
+		        } 
+                }
+
+  	}
+	post {
+		always {
+			notify('started')
+		}
+		failure {
+			notify('err')
+		}
+		success {
+			notify('success')
+		}
 	}
-	post { 
-        	always { 
-            	notify ('NOTIFY')
-        	}
-        	failure { 
-        		notify ('FAIL')
-        	}
-        	success {
-        		notify ('SUCCESS')
-        	}
-    	}
 }
+
 def notify(status){
     emailext (
-      to: "anil.maharshi@gmail.com",
-      subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
-      body: """<p>${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
-        <p>Check console output at <a href='${env.BUILD_URL}'>${env.JOB_NAME} 	[${env.BUILD_NUMBER}]</a></p>""",
-    	)
+    to: "devops.kphb@gmail.com",
+    subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+    body: """<p>${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+        <p>Check console output at <a href='${env.BUILD_URL}'>${env.JOB_NAME}  [${env.BUILD_NUMBER}]</a></p>""",
+    )
  }
